@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Virtual environment
+venv/
+.env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (important)
+data/raw/*
+data/processed/*
+
+# IDE
+.vscode/
+.idea/
