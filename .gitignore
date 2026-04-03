@@ -20,3 +20,4 @@ data/processed/*
 # IDE
 .vscode/
 .idea/
+.streamlit/
