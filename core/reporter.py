@@ -1,6 +1,5 @@
 """
-reporter.py - Generates flagged records CSV and QC summary CSV report
-Updated: Removed openpyxl dependency to use standard CSV.
+reporter.py - Generates flagged records CSV and QC summary Excel report
 """
 
 import os
@@ -16,7 +15,7 @@ class Reporter:
     """
     Takes a list of CheckResults and produces:
     1. flagged_records.csv  - all flagged rows with issue metadata
-    2. qc_summary.csv      - aggregated summary of all checks
+    2. qc_summary.xlsx      - aggregated summary + per-interviewer breakdown
     """
 
     def __init__(self, output_dir: str = "outputs"):
@@ -34,8 +33,7 @@ class Reporter:
         all_flagged = []
 
         for result in results:
-            # Note: Changed result.flag_count to len(result.flagged_rows) for safety
-            if len(result.flagged_rows) == 0:
+            if result.flag_count == 0:
                 continue
             df = result.flagged_rows.copy()
             df["_qc_check"] = result.check_name
@@ -53,8 +51,8 @@ class Reporter:
         logger.info(f"Flagged records saved: {path} ({len(combined)} rows)")
 
     def _export_qc_summary(self, results: List[CheckResult], df_original: pd.DataFrame, ts: str):
-        """Write summary data to CSV (Replaces Excel logic)."""
-        path = os.path.join(self.output_dir, f"qc_summary_{ts}.csv")
+        """Write Excel workbook with summary sheet + optional interviewer sheet."""
+        path = os.path.join(self.output_dir, f"qc_summary_{ts}.xlsx")
 
         summary_data = []
         for r in results:
@@ -62,22 +60,26 @@ class Reporter:
                 "Check": r.check_name,
                 "Issue Type": r.issue_type,
                 "Severity": r.severity,
-                "Flagged Count": len(r.flagged_rows),
+                "Flagged Count": r.flag_count,
                 "Notes": str(r.metadata),
             })
-        
         summary_df = pd.DataFrame(summary_data)
-        
-        # Save main summary
-        summary_df.to_csv(path, index=False)
+
+        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+            summary_df.to_excel(writer, sheet_name="QC Summary", index=False)
+
+            # Per-interviewer breakdown (if interviewer_id column exists)
+            if df_original is not None:
+                self._write_interviewer_sheet(writer, results, df_original)
+
+            # Flag count by severity
+            sev_df = summary_df.groupby("Severity")["Flagged Count"].sum().reset_index()
+            sev_df.to_excel(writer, sheet_name="By Severity", index=False)
+
         logger.info(f"QC summary saved: {path}")
 
-        # Save Interviewer breakdown separately if it exists
-        if df_original is not None:
-            self._save_interviewer_csv(results, df_original, ts)
-
-    def _save_interviewer_csv(self, results: List[CheckResult], df_original: pd.DataFrame, ts: str):
-        """Saves interviewer breakdown as a separate CSV file."""
+    def _write_interviewer_sheet(self, writer, results: List[CheckResult], df_original: pd.DataFrame):
+        """Add per-interviewer flag breakdown if interviewer_id column is present."""
         interviewer_col = next(
             (c for c in df_original.columns if "interviewer" in c.lower()),
             None
@@ -87,7 +89,7 @@ class Reporter:
 
         rows = []
         for result in results:
-            if len(result.flagged_rows) == 0:
+            if result.flag_count == 0:
                 continue
             flagged = result.flagged_rows
             if interviewer_col not in flagged.columns:
@@ -99,9 +101,8 @@ class Reporter:
 
         if rows:
             interviewer_df = pd.concat(rows, ignore_index=True)
-            path = os.path.join(self.output_dir, f"interviewer_breakdown_{ts}.csv")
-            interviewer_df.to_csv(path, index=False)
-            logger.info(f"Interviewer breakdown saved: {path}")
+            interviewer_df.to_excel(writer, sheet_name="Interviewer Breakdown", index=False)
+            logger.info("Interviewer breakdown sheet written.")
 
     def print_summary(self, results: List[CheckResult]):
         """Print a human-readable summary to console."""
@@ -111,9 +112,8 @@ class Reporter:
         total = 0
         for r in results:
             icon = "🔴" if r.severity == "critical" else "🟡" if r.severity == "warning" else "🔵"
-            count = len(r.flagged_rows)
-            print(f"{icon} [{r.severity.upper()}] {r.check_name}: {count} flags")
-            total += count
+            print(f"{icon} [{r.severity.upper()}] {r.check_name}: {r.flag_count} flags")
+            total += r.flag_count
         print("-" * 60)
         print(f"TOTAL FLAGS: {total}")
         print("=" * 60 + "\n")
