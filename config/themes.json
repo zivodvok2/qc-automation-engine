@@ -1,0 +1,41 @@
+{
+  "dark": {
+    "name": "Dark",
+    "bg": "#0b0c0f",
+    "surface": "#111318",
+    "surface2": "#181b22",
+    "border": "#1f2330",
+    "accent": "#4af0a0",
+    "text": "#e8eaf2",
+    "text2": "#8b90a8",
+    "critical": "#f04a6a",
+    "warning": "#f0c04a",
+    "info": "#4a9ef0"
+  },
+  "light": {
+    "name": "Light",
+    "bg": "#f8f9fb",
+    "surface": "#ffffff",
+    "surface2": "#f1f3f7",
+    "border": "#e2e6ef",
+    "accent": "#0d9f6b",
+    "text": "#1a1d2e",
+    "text2": "#5a6078",
+    "critical": "#d93057",
+    "warning": "#c97d10",
+    "info": "#1a6fc4"
+  },
+  "midnight": {
+    "name": "Midnight Blue",
+    "bg": "#06080f",
+    "surface": "#0d1220",
+    "surface2": "#131a2e",
+    "border": "#1c2540",
+    "accent": "#5b8fff",
+    "text": "#dce3f5",
+    "text2": "#7a89b0",
+    "critical": "#ff5c7a",
+    "warning": "#ffb830",
+    "info": "#5b8fff"
+  }
+}

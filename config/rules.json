@@ -1,0 +1,132 @@
+{
+  "missing_threshold": 0.1,
+
+  "range_rules": [
+    {"column": "age",          "min": 18,  "max": 99},
+    {"column": "income",       "min": 0,   "max": 9999999},
+    {"column": "satisfaction", "min": 1,   "max": 10}
+  ],
+
+  "logic_rules": [
+    {
+      "description": "Under-18 respondents should not be married or have salary",
+      "if_conditions": [
+        {"column": "age", "operator": "<", "value": 18}
+      ],
+      "then_conditions": [
+        {"column": "married", "operator": "is_null"},
+        {"column": "salary",  "operator": "is_null"}
+      ]
+    },
+    {
+      "description": "If employed=No, job_title and salary must be null",
+      "if_conditions": [
+        {"column": "employed", "operator": "==", "value": "No"}
+      ],
+      "then_conditions": [
+        {"column": "job_title", "operator": "is_null"},
+        {"column": "salary",    "operator": "is_null"}
+      ]
+    },
+    {
+      "description": "Adults (18+) must have education level recorded",
+      "if_conditions": [
+        {"column": "age", "operator": ">=", "value": 18}
+      ],
+      "then_conditions": [
+        {"column": "education", "operator": "not_null"}
+      ]
+    },
+    {
+      "description": "If consent != Yes, all survey questions must be null",
+      "if_conditions": [
+        {"column": "consent", "operator": "!=", "value": "Yes"}
+      ],
+      "then_conditions": [
+        {"column": "Q1", "operator": "is_null"},
+        {"column": "Q2", "operator": "is_null"},
+        {"column": "Q3", "operator": "is_null"}
+      ]
+    },
+    {
+      "description": "High income earners must have employment status recorded",
+      "if_conditions": [
+        {"column": "income", "operator": ">", "value": 100000}
+      ],
+      "then_conditions": [
+        {"column": "employed",  "operator": "not_null"},
+        {"column": "job_title", "operator": "not_null"}
+      ]
+    },
+    {
+      "description": "Q5=No means Q6 must be null (legacy format still works)",
+      "if_column": "Q5",
+      "if_value": "No",
+      "then_column": "Q6",
+      "then_condition": "must_be_null"
+    }
+  ],
+
+  "pattern_rules": [
+    {"column": "phone", "pattern": "^[+]?[0-9 ()-]{7,15}$", "description": "Valid phone format"},
+    {"column": "email", "pattern": "^[^@]+@[^@]+\\.[^@]+$",  "description": "Valid email format"}
+  ],
+
+  "duplicate_check": {
+    "enabled": true,
+    "subset_columns": ["respondent_id"]
+  },
+
+  "interview_duration": {
+    "enabled": true,
+    "column": "duration_minutes",
+    "min_expected": 5,
+    "max_expected": 120
+  },
+
+  "anomaly_check": {
+    "enabled": true,
+    "columns": ["age", "income", "satisfaction", "duration_minutes"],
+    "multiplier": 1.5
+  },
+
+  "straightlining": {
+    "enabled": true,
+    "question_columns": ["Q1", "Q2", "Q3", "Q4", "Q5"],
+    "threshold": 0.9,
+    "interviewer_column": "interviewer_id",
+    "min_questions": 3
+  },
+
+  "interviewer_duration_check": {
+    "enabled": true,
+    "interviewer_column": "interviewer_id",
+    "duration_column": "duration_minutes",
+    "multiplier": 1.5,
+    "min_interviews": 3
+  },
+
+  "interviewer_productivity_check": {
+    "enabled": true,
+    "interviewer_column": "interviewer_id",
+    "multiplier": 1.5,
+    "date_column": null
+  },
+
+  "consent_eligibility_check": {
+    "enabled": false,
+    "screener_column": "consent",
+    "disqualify_operator": "!=",
+    "disqualify_value": "Yes",
+    "subsequent_columns": ["Q1", "Q2", "Q3", "Q4", "Q5"]
+  },
+
+  "fabrication_check": {
+    "enabled": true,
+    "id_column": "respondent_id",
+    "numeric_columns": ["Q1", "Q2", "Q3", "Q4", "Q5"],
+    "interviewer_column": "interviewer_id",
+    "variance_threshold": 0.1,
+    "sequence_run_length": 5
+  }
+}

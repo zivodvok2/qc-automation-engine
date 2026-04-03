@@ -1,0 +1,9 @@
+{
+  "version": "2.0.0",
+  "release_date": "2026-04-03",
+  "changelog": [
+    "v2.0.0 — Full UI redesign (DataSense). Added drag-and-drop column selector, Logic Checks tab, enhanced EDA with multi-variable charts and heatmaps, straightlining base variable selection, verbatim quality checks via Ollama, onboarding tooltips, settings panel, theme switcher.",
+    "v1.1.0 — Added straightlining, interviewer duration/productivity, consent/eligibility, fabrication detection, enhanced logic checks with rich operators.",
+    "v1.0.0 — Initial release. Missing value checks, range checks, duplicate detection, pattern validation, basic EDA."
+  ]
+}

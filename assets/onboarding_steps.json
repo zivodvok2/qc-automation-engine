@@ -1,0 +1,50 @@
+[
+  {
+    "id": "welcome",
+    "title": "Welcome to DataSense",
+    "body": "DataSense is a survey quality control tool. Upload a CSV or Excel file to get started — it will automatically detect issues in your data and give you a structured report.",
+    "icon": "👋"
+  },
+  {
+    "id": "upload",
+    "title": "Upload your data",
+    "body": "Use the sidebar to upload a CSV or Excel file. DataSense accepts .csv, .xlsx, and .xls formats. Once uploaded, QC checks run automatically.",
+    "icon": "📂"
+  },
+  {
+    "id": "column_panel",
+    "title": "Drag columns to configure checks",
+    "body": "Once data is loaded, a column panel appears on the left. Drag any column into a check's target area, or type column names separated by commas.",
+    "icon": "↔️"
+  },
+  {
+    "id": "qc_tab",
+    "title": "QC Report tab",
+    "body": "This tab shows all issues found in your data, grouped by severity — Critical, Warning, and Info. Expand any issue to see the flagged rows.",
+    "icon": "🔍"
+  },
+  {
+    "id": "logic_tab",
+    "title": "Logic Checks tab",
+    "body": "Define conditional rules here: 'If column A meets a condition, column B should meet another condition.' Drag columns from the panel on the left into the rule builder.",
+    "icon": "🔗"
+  },
+  {
+    "id": "straightlining_tab",
+    "title": "Straightlining tab",
+    "body": "Drag your base variable (e.g. interviewer ID) and your question columns here to detect respondents giving the same answer across all questions.",
+    "icon": "📋"
+  },
+  {
+    "id": "eda_tab",
+    "title": "EDA tab",
+    "body": "Drag columns to build custom charts. Choose from bar, line, scatter, heatmap, and more. You can combine multiple columns for multi-variable analysis.",
+    "icon": "📊"
+  },
+  {
+    "id": "export",
+    "title": "Export your report",
+    "body": "Click the Download Report button at the top right to get an Excel file with your QC flags, EDA summary, and clean data snapshot.",
+    "icon": "⬇️"
+  }
+]
