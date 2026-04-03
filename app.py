@@ -216,22 +216,36 @@ results  = st.session_state.qc_results
 filename = st.session_state.filename
 
 # ── Header ────────────────────────────────────────────────────────────────────
-def _build_report(df_clean, results) -> io.BytesIO:
-    out = io.BytesIO()
-    with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        pd.DataFrame([r.summary() for r in results]).to_excel(
-            writer, sheet_name="QC Summary", index=False)
-        frames = [r.flagged_rows.assign(_check=r.check_name, _severity=r.severity)
-                  for r in results if r.flag_count > 0]
-        if frames:
-            pd.concat(frames, ignore_index=True).to_excel(
-                writer, sheet_name="Flagged Records", index=False)
-        nc = df_clean.select_dtypes(include="number").columns
-        if len(nc):
-            df_clean[nc].describe().T.to_excel(writer, sheet_name="EDA Numeric")
-        df_clean.head(500).to_excel(writer, sheet_name="Clean Data", index=False)
-    out.seek(0)
-    return out
+# Locate the _build_report function in your app.py (usually near the bottom)
+
+def _build_report(df, results):
+    """
+    Builds a consolidated CSV report for the Streamlit UI.
+    Replaces ExcelWriter to avoid openpyxl dependency.
+    """
+    import pandas as pd
+    import io
+
+    all_flagged = []
+    for res in results:
+        # Check if flagged_rows exists and has data
+        if hasattr(res, 'flagged_rows') and not res.flagged_rows.empty:
+            tmp = res.flagged_rows.copy()
+            tmp["QC_Check_Name"] = res.check_name
+            tmp["QC_Issue_Type"] = res.issue_type
+            tmp["QC_Severity"] = res.severity
+            all_flagged.append(tmp)
+    
+    if all_flagged:
+        final_df = pd.concat(all_flagged, ignore_index=True)
+    else:
+        # Return a simple CSV saying no issues were found
+        final_df = pd.DataFrame([{"System Message": "No QC issues flagged in this run."}])
+
+    # Convert DataFrame to CSV string and then to bytes
+    return final_df.to_csv(index=False).encode('utf-8')
+
+
 
 
 h1, h2 = st.columns([5, 1])
@@ -247,13 +261,15 @@ with h1:
         unsafe_allow_html=True,
     )
 with h2:
-    st.download_button(
-        "↓ Report",
-        data=_build_report(df, results),
-        file_name=f"DataSense_{filename.rsplit('.',1)[0]}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-        type="primary",
+    # --- In your Streamlit UI section (where the button is rendered) ---
+
+# Replace the existing st.download_button with this:
+st.download_button(
+    label="📥 Download Detailed QC Report (CSV)",
+    data=_build_report(df, results),
+    file_name=f"datasense_report_{timestamp_str()}.csv",
+    mime="text/csv",
+)
     )
 
 st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
