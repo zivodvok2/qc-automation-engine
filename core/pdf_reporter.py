@@ -1,0 +1,421 @@
+"""
+core/pdf_reporter.py — PDF report generator
+
+Produces a formatted, client-ready PDF with:
+  - Cover page (file metadata, summary stats)
+  - QC Summary table (all checks)
+  - Flag breakdown per check (with sample rows)
+  - Interviewer risk table (if risk data is in session state)
+
+Requires: reportlab  (pip install reportlab)
+"""
+
+from __future__ import annotations
+import io
+from datetime import datetime
+from typing import Optional
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+        HRFlowable, PageBreak, KeepTogether,
+    )
+    from reportlab.graphics.shapes import Drawing, Rect, String
+    from reportlab.graphics import renderPDF
+    _REPORTLAB = True
+except ImportError:
+    _REPORTLAB = False
+
+import pandas as pd
+
+# ── Colour palette (professional light theme — printable) ─────────────────────
+_ACCENT   = "#0d6efd" if not _REPORTLAB else colors.HexColor("#0d6efd")
+_DARK     = "#1a1c2e" if not _REPORTLAB else colors.HexColor("#1a1c2e")
+_SURFACE  = "#f4f6fb" if not _REPORTLAB else colors.HexColor("#f4f6fb")
+_SURFACE2 = "#e8eaf2" if not _REPORTLAB else colors.HexColor("#e8eaf2")
+_TEXT     = "#1a1c2e" if not _REPORTLAB else colors.HexColor("#1a1c2e")
+_TEXT2    = "#5a5e80" if not _REPORTLAB else colors.HexColor("#5a5e80")
+_RED      = "#dc3545" if not _REPORTLAB else colors.HexColor("#dc3545")
+_AMBER    = "#fd7e14" if not _REPORTLAB else colors.HexColor("#fd7e14")
+_GREEN    = "#198754" if not _REPORTLAB else colors.HexColor("#198754")
+_BORDER   = "#d0d3e8" if not _REPORTLAB else colors.HexColor("#d0d3e8")
+_WHITE    = colors.white if _REPORTLAB else "#ffffff"
+
+
+def is_available() -> bool:
+    return _REPORTLAB
+
+
+def generate_pdf(
+    filename: str,
+    df: pd.DataFrame,
+    results: list,
+    risk_df: Optional[pd.DataFrame] = None,
+    project_name: str = "",
+) -> io.BytesIO:
+    """
+    Generate a PDF QC report and return it as a BytesIO buffer.
+
+    Parameters
+    ----------
+    filename     : original uploaded filename
+    df           : cleaned DataFrame (for stats)
+    results      : list[CheckResult] from the pipeline
+    risk_df      : optional interviewer risk table DataFrame
+    project_name : optional project name for cover page
+    """
+    if not _REPORTLAB:
+        raise ImportError(
+            "reportlab is required for PDF export. "
+            "Install it with: pip install reportlab"
+        )
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        rightMargin=2 * cm,
+        leftMargin=2 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+        title=f"DataSense QC Report — {filename}",
+        author="DataSense",
+    )
+
+    styles = _build_styles()
+    elements = []
+
+    # ── Cover page ────────────────────────────────────────────────────────────
+    elements += _cover_page(styles, filename, df, results, project_name)
+    elements.append(PageBreak())
+
+    # ── QC Summary table ──────────────────────────────────────────────────────
+    elements.append(Paragraph("QC Summary", styles["section"]))
+    elements.append(_qc_summary_table(df, results, styles))
+    elements.append(Spacer(1, 0.6 * cm))
+
+    # ── Flag distribution bar chart ───────────────────────────────────────────
+    chart = _flag_bar_chart(results)
+    if chart:
+        elements.append(Paragraph("Flag Distribution by Check", styles["section"]))
+        elements.append(chart)
+        elements.append(Spacer(1, 0.6 * cm))
+
+    # ── Per-check flag detail ─────────────────────────────────────────────────
+    flagged_results = [r for r in results if r.flag_count > 0]
+    if flagged_results:
+        elements.append(Paragraph("Flagged Records Detail", styles["section"]))
+        for r in flagged_results[:12]:  # cap at 12 for PDF size
+            elements += _check_detail_block(r, df, styles)
+
+    # ── Interviewer risk table ────────────────────────────────────────────────
+    if risk_df is not None and not risk_df.empty:
+        elements.append(PageBreak())
+        elements.append(Paragraph("Interviewer Risk Scores", styles["section"]))
+        elements.append(
+            Paragraph(
+                "Weighted composite score (0–100) per interviewer across all checks. "
+                "Red ≥ 60 · Amber ≥ 30 · Green &lt; 30.",
+                styles["caption"],
+            )
+        )
+        elements.append(Spacer(1, 0.3 * cm))
+        elements.append(_risk_table(risk_df, styles))
+
+    # ── Footer note ───────────────────────────────────────────────────────────
+    elements.append(Spacer(1, 1 * cm))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=_BORDER))
+    elements.append(
+        Paragraph(
+            f"Generated by DataSense on {datetime.now().strftime('%d %B %Y at %H:%M')}. "
+            "This report is confidential.",
+            styles["footer"],
+        )
+    )
+
+    doc.build(elements)
+    buf.seek(0)
+    return buf
+
+
+# ── Style helpers ─────────────────────────────────────────────────────────────
+
+def _build_styles() -> dict:
+    base = getSampleStyleSheet()
+    s = {}
+
+    s["title"] = ParagraphStyle(
+        "ds_title",
+        fontName="Helvetica-Bold",
+        fontSize=32,
+        textColor=_DARK,
+        alignment=TA_LEFT,
+        spaceAfter=4,
+    )
+    s["subtitle"] = ParagraphStyle(
+        "ds_subtitle",
+        fontName="Helvetica",
+        fontSize=11,
+        textColor=_ACCENT,
+        alignment=TA_LEFT,
+        spaceAfter=16,
+    )
+    s["section"] = ParagraphStyle(
+        "ds_section",
+        fontName="Helvetica-Bold",
+        fontSize=13,
+        textColor=_DARK,
+        spaceBefore=14,
+        spaceAfter=8,
+        borderPad=0,
+    )
+    s["body"] = ParagraphStyle(
+        "ds_body",
+        fontName="Helvetica",
+        fontSize=9,
+        textColor=_TEXT2,
+        spaceAfter=4,
+    )
+    s["caption"] = ParagraphStyle(
+        "ds_caption",
+        fontName="Helvetica",
+        fontSize=8,
+        textColor=_TEXT2,
+        spaceAfter=4,
+    )
+    s["footer"] = ParagraphStyle(
+        "ds_footer",
+        fontName="Helvetica",
+        fontSize=7.5,
+        textColor=_TEXT2,
+        alignment=TA_CENTER,
+        spaceBefore=6,
+    )
+    s["meta_label"] = ParagraphStyle(
+        "ds_meta_label",
+        fontName="Helvetica-Bold",
+        fontSize=8.5,
+        textColor=_ACCENT,
+    )
+    s["meta_value"] = ParagraphStyle(
+        "ds_meta_value",
+        fontName="Helvetica",
+        fontSize=8.5,
+        textColor=_TEXT,
+    )
+    return s
+
+
+def _tbl_style(header_bg=None, row_bgs=None, font_size=8.5) -> TableStyle:
+    """Standard DataSense table style."""
+    header_bg = header_bg or _DARK
+    row_bgs   = row_bgs   or [_WHITE, _SURFACE]
+    return TableStyle([
+        ("BACKGROUND",   (0, 0), (-1,  0), header_bg),
+        ("TEXTCOLOR",    (0, 0), (-1,  0), _WHITE),
+        ("FONTNAME",     (0, 0), (-1,  0), "Helvetica-Bold"),
+        ("FONTSIZE",     (0, 0), (-1, -1), font_size),
+        ("FONTNAME",     (0, 1), (-1, -1), "Helvetica"),
+        ("TEXTCOLOR",    (0, 1), (-1, -1), _TEXT),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), row_bgs),
+        ("TOPPADDING",   (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("GRID",         (0, 0), (-1, -1), 0.3, _BORDER),
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+    ])
+
+
+# ── Page builders ─────────────────────────────────────────────────────────────
+
+def _cover_page(styles, filename, df, results, project_name):
+    total_flags = sum(r.flag_count for r in results)
+    crits  = sum(r.flag_count for r in results if r.severity == "critical")
+    warns  = sum(r.flag_count for r in results if r.severity == "warning")
+    flag_rate = f"{total_flags / max(len(df), 1) * 100:.1f}%"
+
+    elems = []
+    elems.append(Spacer(1, 1.5 * cm))
+    elems.append(Paragraph("DataSense", styles["title"]))
+    elems.append(Paragraph("SURVEY QUALITY CONTROL REPORT", styles["subtitle"]))
+    elems.append(HRFlowable(width="100%", thickness=1.5, color=_ACCENT))
+    elems.append(Spacer(1, 0.5 * cm))
+
+    if project_name:
+        elems.append(
+            Paragraph(f"Project: {project_name}", styles["section"])
+        )
+        elems.append(Spacer(1, 0.2 * cm))
+
+    # Metadata table
+    meta = [
+        ["Field", "Value"],
+        ["File",        filename],
+        ["Date",        datetime.now().strftime("%d %B %Y, %H:%M")],
+        ["Rows",        f"{len(df):,}"],
+        ["Columns",     str(len(df.columns))],
+        ["Checks Run",  str(len(results))],
+        ["Total Flags", str(total_flags)],
+        ["Flag Rate",   flag_rate],
+    ]
+    meta_tbl = Table(meta, colWidths=[5 * cm, 12 * cm])
+    meta_tbl.setStyle(_tbl_style())
+    elems.append(meta_tbl)
+    elems.append(Spacer(1, 0.8 * cm))
+
+    # Summary stats row
+    stat_data = [
+        ["Total Flags", "Critical", "Warnings", "Flag Rate"],
+        [str(total_flags), str(crits), str(warns), flag_rate],
+    ]
+    stat_tbl = Table(stat_data, colWidths=[4.25 * cm] * 4)
+    stat_tbl.setStyle(TableStyle([
+        ("BACKGROUND",   (0, 0), (-1,  0), _ACCENT),
+        ("TEXTCOLOR",    (0, 0), (-1,  0), _WHITE),
+        ("FONTNAME",     (0, 0), (-1,  0), "Helvetica-Bold"),
+        ("FONTSIZE",     (0, 0), (-1, -1), 9),
+        ("FONTNAME",     (0, 1), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE",     (0, 1), (-1, -1), 20),
+        ("TEXTCOLOR",    (0, 1), (-1, -1), _DARK),
+        ("BACKGROUND",   (0, 1), (-1, -1), _SURFACE),
+        ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING",   (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 8),
+        ("GRID",         (0, 0), (-1, -1), 0.5, _BORDER),
+    ]))
+    elems.append(stat_tbl)
+
+    return elems
+
+
+def _qc_summary_table(df, results, styles) -> Table:
+    header = ["Check", "Severity", "Flags", "Flag %", "Status"]
+    rows = [header]
+    for r in sorted(results, key=lambda x: {"critical": 0, "warning": 1, "info": 2}.get(x.severity, 3)):
+        pct = r.flag_count / max(len(df), 1) * 100
+        status = "PASS" if r.flag_count == 0 else r.severity.upper()
+        rows.append([
+            r.check_name,
+            r.severity,
+            str(r.flag_count),
+            f"{pct:.1f}%",
+            status,
+        ])
+
+    tbl = Table(rows, colWidths=[7.5 * cm, 2.5 * cm, 2 * cm, 2 * cm, 3 * cm])
+    style = _tbl_style()
+
+    # Colour-code severity and status cells
+    for i, r in enumerate(results, start=1):
+        sev_col = {"critical": _RED, "warning": _AMBER, "info": _ACCENT}.get(r.severity, _TEXT2)
+        style.add("TEXTCOLOR", (1, i), (1, i), sev_col)
+        if r.flag_count == 0:
+            style.add("TEXTCOLOR", (4, i), (4, i), _GREEN)
+        else:
+            style.add("TEXTCOLOR", (4, i), (4, i), sev_col)
+
+    tbl.setStyle(style)
+    return tbl
+
+
+def _flag_bar_chart(results) -> Optional[Drawing]:
+    """Simple horizontal bar chart of flag counts using reportlab Drawing."""
+    flagged = [(r.check_name, r.flag_count, r.severity)
+               for r in results if r.flag_count > 0]
+    if not flagged:
+        return None
+
+    flagged.sort(key=lambda x: x[1], reverse=True)
+    max_flags = max(f[1] for f in flagged)
+    bar_width  = 220
+    bar_height = 12
+    spacing    = 18
+    chart_h    = len(flagged) * spacing + 20
+    chart_w    = bar_width + 160  # label + bar + value
+
+    d = Drawing(chart_w, chart_h)
+
+    for i, (name, count, sev) in enumerate(flagged):
+        y = chart_h - (i + 1) * spacing
+        bar_len = max(2, int(count / max_flags * bar_width))
+        fill = {"critical": colors.HexColor("#dc3545"),
+                "warning":  colors.HexColor("#fd7e14"),
+                "info":     colors.HexColor("#0d6efd")}.get(sev, colors.grey)
+
+        # Background bar
+        bg = Rect(120, y, bar_width, bar_height - 2, fillColor=colors.HexColor("#e8eaf2"), strokeColor=None)
+        d.add(bg)
+
+        # Foreground bar
+        fg = Rect(120, y, bar_len, bar_height - 2, fillColor=fill, strokeColor=None)
+        d.add(fg)
+
+        # Check name label
+        lbl = String(115, y + 2, name.replace("_check", "").replace("_", " ").title(),
+                     fontName="Helvetica", fontSize=7,
+                     textAnchor="end", fillColor=colors.HexColor("#1a1c2e"))
+        d.add(lbl)
+
+        # Count value
+        val = String(125 + bar_len, y + 2, str(count),
+                     fontName="Helvetica-Bold", fontSize=7,
+                     fillColor=fill)
+        d.add(val)
+
+    return d
+
+
+def _check_detail_block(result, df, styles) -> list:
+    elems = []
+    pct = result.flag_count / max(len(df), 1) * 100
+    sev_col = {"critical": "#dc3545", "warning": "#fd7e14", "info": "#0d6efd"}.get(result.severity, "#5a5e80")
+
+    title = (
+        f'<font color="{sev_col}"><b>{result.check_name}</b></font>'
+        f' — {result.flag_count} flags ({pct:.1f}%) · {result.severity}'
+    )
+    elems.append(Paragraph(title, styles["body"]))
+
+    # Sample of flagged rows (first 5, non-meta columns only)
+    if not result.flagged_rows.empty:
+        show_cols = [c for c in result.flagged_rows.columns if not c.startswith("_")][:8]
+        if show_cols:
+            sample = result.flagged_rows[show_cols].head(5).fillna("—").astype(str)
+            tbl_data = [list(sample.columns)] + sample.values.tolist()
+            col_w = 17 * cm / len(show_cols)
+            tbl = Table(tbl_data, colWidths=[col_w] * len(show_cols))
+            tbl.setStyle(_tbl_style(font_size=7.5))
+            elems.append(tbl)
+
+    elems.append(Spacer(1, 0.4 * cm))
+    return elems
+
+
+def _risk_table(risk_df: pd.DataFrame, styles) -> Table:
+    display = risk_df.sort_values("Risk Score", ascending=False).head(30)
+    rows = [list(display.columns)]
+    for _, row in display.iterrows():
+        rows.append([str(v) for v in row.values])
+
+    col_count = len(display.columns)
+    col_w = 17 * cm / col_count
+    tbl = Table(rows, colWidths=[col_w] * col_count)
+    style = _tbl_style(font_size=7.5)
+
+    # Colour RAG column
+    if "Risk" in display.columns:
+        rag_idx = list(display.columns).index("Risk")
+        for i, (_, row) in enumerate(display.iterrows(), start=1):
+            rag_val = str(row.get("Risk", ""))
+            col = _GREEN if "LOW" in rag_val else (_AMBER if "MED" in rag_val else _RED)
+            style.add("TEXTCOLOR", (rag_idx, i), (rag_idx, i), col)
+            style.add("FONTNAME",  (rag_idx, i), (rag_idx, i), "Helvetica-Bold")
+
+    tbl.setStyle(style)
+    return tbl

@@ -18,6 +18,8 @@ from checks.advanced_checks import (
     ConsentEligibilityCheck,
     FabricationCheck,
 )
+from checks.consistency_checks import ConsistencyCheck
+from checks.near_duplicate_checks import NearDuplicateCheck
 try:
     from checks.verbatim_checks import VerbatimQualityCheck
     _VERBATIM_AVAILABLE = True
@@ -133,6 +135,23 @@ class RuleEngine:
                 interviewer_column=fab.get("interviewer_column"),
                 variance_threshold=fab.get("variance_threshold", 0.1),
                 sequence_run_length=fab.get("sequence_run_length", 5),
+            ))
+
+        # ── Consistency check ─────────────────────────────────────────────────
+        cons_rules = cfg.get("consistency_rules", [])
+        if cons_rules:
+            self.checks.append(ConsistencyCheck(rules=cons_rules))
+
+        # ── Near-duplicate detection ──────────────────────────────────────────
+        nd = cfg.get("near_duplicate_check", {})
+        if nd.get("enabled"):
+            self.checks.append(NearDuplicateCheck(
+                respondent_id_column=nd.get("respondent_id_column"),
+                shared_id_column=nd.get("shared_id_column"),
+                demographic_columns=nd.get("demographic_columns", []),
+                response_columns=nd.get("response_columns", []),
+                max_diff_columns=nd.get("max_diff_columns", 1),
+                min_demo_repeats=nd.get("min_demo_repeats", 3),
             ))
 
         # ── Verbatim quality check ──────────────────────────────────────────
